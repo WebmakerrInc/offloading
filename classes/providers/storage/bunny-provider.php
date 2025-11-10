@@ -274,22 +274,29 @@ class Bunny_Provider extends Storage_Provider {
                 return $this;
         }
 
-        /**
-         * Fetch an object from Bunny storage.
-         *
-         * @param array $args
-         *
-         * @return array|WP_Error
-         */
-        public function get_object( array $args ) {
-                $response = Bunny_Helper::get( $args['Bucket'], $args['Key'], $this->get_api_key(), $this->get_storage_region() );
+       /**
+        * Fetch an object from Bunny storage.
+        *
+        * @param array $args
+        */
+       public function get_object( array $args ) {
+               if ( empty( $args['SaveAs'] ) ) {
+                       throw new Exception( __( 'Missing destination path for Bunny object download.', 'amazon-s3-and-cloudfront' ) );
+               }
 
-                if ( is_wp_error( $response ) ) {
-                        throw new Exception( $response->get_error_message() );
-                }
+               $response = Bunny_Helper::get( $args['Bucket'], $args['Key'], $this->get_api_key(), $this->get_storage_region() );
 
-                return $response;
-        }
+               if ( is_wp_error( $response ) ) {
+                       throw new Exception( $response->get_error_message() );
+               }
+
+               $body    = wp_remote_retrieve_body( $response );
+               $written = file_put_contents( $args['SaveAs'], $body );
+
+               if ( false === $written ) {
+                       throw new Exception( sprintf( __( 'Failed to write Bunny object to disk: %s', 'amazon-s3-and-cloudfront' ), $args['SaveAs'] ) );
+               }
+       }
 
         /**
          * Get object's URL.
