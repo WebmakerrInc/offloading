@@ -18,6 +18,7 @@ use DeliciousBrains\WP_Offload_Media\Items\Media_Library_Item;
 use DeliciousBrains\WP_Offload_Media\Items\Remove_Local_Handler;
 use DeliciousBrains\WP_Offload_Media\Items\Remove_Provider_Handler;
 use DeliciousBrains\WP_Offload_Media\Items\Upload_Handler;
+use DeliciousBrains\WP_Offload_Media\Integrations\Bunny_Helper;
 use DeliciousBrains\WP_Offload_Media\Providers\Delivery\AWS_CloudFront;
 use DeliciousBrains\WP_Offload_Media\Providers\Delivery\Cloudflare;
 use DeliciousBrains\WP_Offload_Media\Providers\Delivery\Delivery_Provider;
@@ -29,6 +30,7 @@ use DeliciousBrains\WP_Offload_Media\Providers\Delivery\StackPath;
 use DeliciousBrains\WP_Offload_Media\Providers\Delivery\Storage;
 use DeliciousBrains\WP_Offload_Media\Providers\Provider;
 use DeliciousBrains\WP_Offload_Media\Providers\Storage\AWS_Provider;
+use DeliciousBrains\WP_Offload_Media\Providers\Storage\Bunny_Provider;
 use DeliciousBrains\WP_Offload_Media\Providers\Storage\DigitalOcean_Provider;
 use DeliciousBrains\WP_Offload_Media\Providers\Storage\GCP_Provider;
 use DeliciousBrains\WP_Offload_Media\Providers\Storage\Null_Provider;
@@ -47,6 +49,7 @@ use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Meta_WP_Error;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Region_Meta;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Tools_Errors;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_WPOS3_To_AS3CF;
+use Exception;
 
 class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 
@@ -223,11 +226,12 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 		$this->plugin_title      = __( 'WP Offload Media Lite', 'amazon-s3-and-cloudfront' );
 		$this->plugin_menu_title = __( 'WP Offload Media', 'amazon-s3-and-cloudfront' );
 
-		static::$storage_provider_classes = apply_filters( 'as3cf_storage_provider_classes', array(
-			AWS_Provider::get_provider_key_name()          => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\AWS_Provider',
-			DigitalOcean_Provider::get_provider_key_name() => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\DigitalOcean_Provider',
-			GCP_Provider::get_provider_key_name()          => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\GCP_Provider',
-		) );
+                static::$storage_provider_classes = apply_filters( 'as3cf_storage_provider_classes', array(
+                        AWS_Provider::get_provider_key_name()          => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\AWS_Provider',
+                        Bunny_Provider::get_provider_key_name()        => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\Bunny_Provider',
+                        DigitalOcean_Provider::get_provider_key_name() => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\DigitalOcean_Provider',
+                        GCP_Provider::get_provider_key_name()          => 'DeliciousBrains\WP_Offload_Media\Providers\Storage\GCP_Provider',
+                ) );
 
 		static::$delivery_provider_classes = apply_filters( 'as3cf_delivery_provider_classes', array(
 			// First Party CDNs.
@@ -249,15 +253,18 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 			add_action( 'as3cf_constant_' . static::settings_constant() . '_changed_bucket', array( $this, 'process_bucket_change_after_init' ) );
 		}
 
-		$this->set_storage_provider();
-		$this->set_delivery_provider();
+                $this->set_storage_provider();
+                $this->set_delivery_provider();
 
-		// Bundled SDK may require AWS setup before any use.
-		$this->handle_aws_access_key_migration();
+                // Bundled SDK may require AWS setup before any use.
+                $this->handle_aws_access_key_migration();
 
-		// Only instantiate upgrade classes on single site installs or primary subsite.
-		if ( ! is_multisite() || is_network_admin() || $this->is_current_blog( get_current_blog_id() ) ) {
-			new Upgrade_Region_Meta( $this );
+                add_action( 'wp_ajax_as3cf_bunny_test_connection', array( $this, 'ajax_bunny_test_connection' ) );
+                add_action( 'wp_ajax_as3cf_bunny_purge_all', array( $this, 'ajax_bunny_purge_all' ) );
+
+                // Only instantiate upgrade classes on single site installs or primary subsite.
+                if ( ! is_multisite() || is_network_admin() || $this->is_current_blog( get_current_blog_id() ) ) {
+                        new Upgrade_Region_Meta( $this );
 			new Upgrade_File_Sizes( $this );
 			new Upgrade_Meta_WP_Error( $this );
 			new Upgrade_Content_Replace_URLs( $this );
@@ -2209,14 +2216,15 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 	 *
 	 * @param array $config Initial settings.
 	 */
-	protected function load_settings_assets( $config = array() ) {
-		$this->enqueue_style( 'as3cf-settings', 'assets/css/settings' );
-		$this->enqueue_script( 'as3cf-settings', 'assets/js/settings', array(), false );
+        protected function load_settings_assets( $config = array() ) {
+                $this->enqueue_style( 'as3cf-settings', 'assets/css/settings' );
+                $this->enqueue_script( 'as3cf-settings', 'assets/js/settings', array(), false );
+                $this->enqueue_script( 'as3cf-settings-bunny', 'assets/js/settings-bunny', array( 'jquery' ), true );
 
-		wp_localize_script( 'as3cf-settings',
-			'as3cf_settings',
-			$config
-		);
+                wp_localize_script( 'as3cf-settings',
+                        'as3cf_settings',
+                        $config
+                );
 	}
 
 	/**
@@ -2345,14 +2353,22 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 				'delivery_provider_title'               => _x( 'Delivery Provider', 'Section title', 'amazon-s3-and-cloudfront' ),
 				'edit_delivery_provider'                => _x( 'Change delivery provider', 'Edit delivery provider button tooltip', 'amazon-s3-and-cloudfront' ),
 				// DeliverySettingsPanel
-				'delivery_settings_title'               => _x( 'Delivery Settings', 'Section title', 'amazon-s3-and-cloudfront' ),
-				'rewrite_media_urls'                    => _x( 'Deliver Offloaded Media', 'Setting title', 'amazon-s3-and-cloudfront' ),
-				'delivery_domain'                       => _x( 'Use Custom Domain Name (CNAME)', 'Setting title', 'amazon-s3-and-cloudfront' ),
-				'domain_blank'                          => __( 'Domain cannot be blank.', 'amazon-s3-and-cloudfront' ),
-				'domain_invalid_content'                => __( 'Domain can only contain letters, numbers, hyphens (-), and periods (.)', 'amazon-s3-and-cloudfront' ),
-				'domain_too_short'                      => __( 'Domain too short.', 'amazon-s3-and-cloudfront' ),
-				'force_https'                           => _x( 'Force HTTPS', 'Setting title', 'amazon-s3-and-cloudfront' ),
-				'force_https_desc'                      => _x( 'Uses HTTPS for every offloaded media item instead of using the scheme of the current page.', 'Setting description', 'amazon-s3-and-cloudfront' ),
+                                'delivery_settings_title'               => _x( 'Delivery Settings', 'Section title', 'amazon-s3-and-cloudfront' ),
+                                'rewrite_media_urls'                    => _x( 'Deliver Offloaded Media', 'Setting title', 'amazon-s3-and-cloudfront' ),
+                                'delivery_domain'                       => _x( 'Use Custom Domain Name (CNAME)', 'Setting title', 'amazon-s3-and-cloudfront' ),
+                                'bunny_cdn_url'                         => _x( 'Bunny CDN URL', 'Setting title', 'amazon-s3-and-cloudfront' ),
+                                'bunny_cdn_url_desc'                    => _x( 'Provide the primary Bunny Pull Zone URL that should be used for serving media.', 'Setting description', 'amazon-s3-and-cloudfront' ),
+                                'bunny_custom_cname'                    => _x( 'Bunny Custom CNAME', 'Setting title', 'amazon-s3-and-cloudfront' ),
+                                'bunny_custom_cname_desc'               => _x( 'Optionally enter a custom domain that points at your Bunny Pull Zone.', 'Setting description', 'amazon-s3-and-cloudfront' ),
+                                'bunny_test_connection'                 => _x( 'Test Connection', 'Button text', 'amazon-s3-and-cloudfront' ),
+                                'bunny_purge_all'                       => _x( 'Purge All Cached Assets', 'Button text', 'amazon-s3-and-cloudfront' ),
+                                'bunny_purge_all_desc'                  => _x( 'Clears the Bunny CDN cache to ensure the latest files are served. Use this after changing media.', 'Setting description', 'amazon-s3-and-cloudfront' ),
+                                'domain_blank'                          => __( 'Domain cannot be blank.', 'amazon-s3-and-cloudfront' ),
+                                'domain_invalid_content'                => __( 'Domain can only contain letters, numbers, hyphens (-), and periods (.)', 'amazon-s3-and-cloudfront' ),
+                                'domain_too_short'                      => __( 'Domain too short.', 'amazon-s3-and-cloudfront' ),
+                                'url_invalid'                           => __( 'URL is not valid.', 'amazon-s3-and-cloudfront' ),
+                                'force_https'                           => _x( 'Force HTTPS', 'Setting title', 'amazon-s3-and-cloudfront' ),
+                                'force_https_desc'                      => _x( 'Uses HTTPS for every offloaded media item instead of using the scheme of the current page.', 'Setting description', 'amazon-s3-and-cloudfront' ),
 				// Settings notices
 				'check_again_title'                     => _x( 'Check again', 'Check again button title', 'amazon-s3-and-cloudfront' ),
 				'check_again_active'                    => _x( 'Checking…', 'Check again button title while checking ', 'amazon-s3-and-cloudfront' ),
@@ -2460,10 +2476,12 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 					'https://github.com/deliciousbrains/wp-amazon-s3-and-cloudfront/issues'
 				),
 				'diagnostic_info_title'                 => _x( 'Diagnostic Info', 'Section title', 'amazon-s3-and-cloudfront' ),
-				'download_diagnostics'                  => _x( 'Download', 'Download diagnostics button text', 'amazon-s3-and-cloudfront' ),
-				// Mimic WP Core's notice text, therefore no translation needed here.
-				'settings_saved'                        => __( 'Settings saved.' ),
-				'dismiss_notice'                        => __( 'Dismiss this notice.' ),
+                                'download_diagnostics'                  => _x( 'Download', 'Download diagnostics button text', 'amazon-s3-and-cloudfront' ),
+                                // Mimic WP Core's notice text, therefore no translation needed here.
+                                'settings_saved'                        => __( 'Settings saved.' ),
+                                'success_action_complete'               => __( 'Action completed successfully.', 'amazon-s3-and-cloudfront' ),
+                                'error_action_failed'                   => __( 'The request could not be completed.', 'amazon-s3-and-cloudfront' ),
+                                'dismiss_notice'                        => __( 'Dismiss this notice.' ),
 			),
 			'settings'                         => $this->obfuscate_sensitive_settings( $this->get_all_settings() ),
 			'defined_settings'                 => array_keys( $this->get_defined_settings() ),
@@ -2578,11 +2596,11 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 	 *
 	 * @return array
 	 */
-	public function get_allowed_settings_keys( bool $include_legacy = false ): array {
-		$keys = array(
-			// Storage
-			'provider',
-			'access-key-id',
+        public function get_allowed_settings_keys( bool $include_legacy = false ): array {
+                $keys = array(
+                        // Storage
+                        'provider',
+                        'access-key-id',
 			'secret-access-key',
 			'key-file-path',
 			'key-file',
@@ -2610,12 +2628,93 @@ class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 			'remove-local-file',
 		);
 
-		if ( $include_legacy ) {
-			$keys = array_merge( $keys, $this->get_legacy_settings_keys() );
-		}
+                if ( $include_legacy ) {
+                        $keys = array_merge( $keys, $this->get_legacy_settings_keys() );
+                }
 
-		return $keys;
-	}
+                $provider = $this->get_storage_provider();
+
+                if ( $provider && method_exists( $provider, 'additional_allowed_settings' ) ) {
+                        $keys = array_merge( $keys, $provider::additional_allowed_settings() );
+                }
+
+                return array_unique( $keys );
+        }
+
+        /**
+         * Handle AJAX request to test Bunny connection.
+         */
+        public function ajax_bunny_test_connection() {
+                check_ajax_referer( 'wp_rest', 'nonce' );
+
+                if ( ! current_user_can( 'manage_options' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'You do not have permission to perform this action.', 'amazon-s3-and-cloudfront' ) ), 403 );
+                }
+
+                if ( ! $this->get_storage_provider() instanceof Bunny_Provider ) {
+                        wp_send_json_error( array( 'message' => __( 'Bunny.net is not the active storage provider.', 'amazon-s3-and-cloudfront' ) ) );
+                }
+
+                $bucket = $this->get_setting( 'bucket' );
+
+                if ( empty( $bucket ) ) {
+                        wp_send_json_error( array( 'message' => __( 'No Bunny Storage Zone configured.', 'amazon-s3-and-cloudfront' ) ) );
+                }
+
+                $key     = 'as3cf-bunny-test-' . time();
+                $payload = sprintf( 'Test at %s', gmdate( 'c' ) );
+
+                try {
+                        $result = $this->get_storage_provider()->can_write( $bucket, $key, $payload );
+                } catch ( Exception $e ) {
+                        wp_send_json_error( array( 'message' => $e->getMessage() ) );
+                }
+
+                if ( true === $result ) {
+                        wp_send_json_success();
+                }
+
+                wp_send_json_error( array( 'message' => $result ) );
+        }
+
+        /**
+         * Handle AJAX request to purge all Bunny CDN cache.
+         */
+        public function ajax_bunny_purge_all() {
+                check_ajax_referer( 'wp_rest', 'nonce' );
+
+                if ( ! current_user_can( 'manage_options' ) ) {
+                        wp_send_json_error( array( 'message' => __( 'You do not have permission to perform this action.', 'amazon-s3-and-cloudfront' ) ), 403 );
+                }
+
+                if ( ! $this->get_storage_provider() instanceof Bunny_Provider ) {
+                        wp_send_json_error( array( 'message' => __( 'Bunny.net is not the active storage provider.', 'amazon-s3-and-cloudfront' ) ) );
+                }
+
+                $cdn = $this->get_setting( Bunny_Provider::CDN_URL_SETTING );
+
+                if ( empty( $cdn ) ) {
+                        $cdn = $this->get_setting( Bunny_Provider::CUSTOM_CNAME_SETTING );
+                }
+
+                if ( empty( $cdn ) && $this->get_setting( 'enable-delivery-domain' ) ) {
+                        $cdn = $this->get_setting( 'delivery-domain' );
+                }
+
+                if ( empty( $cdn ) ) {
+                        wp_send_json_error( array( 'message' => __( 'No Bunny CDN URL configured.', 'amazon-s3-and-cloudfront' ) ) );
+                }
+
+                $cdn = trailingslashit( $cdn );
+
+                $result = Bunny_Helper::purge_url( $this->get_setting( 'access-key-id' ), $cdn );
+
+                if ( is_wp_error( $result ) ) {
+                        wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+                }
+
+                wp_send_json_success();
+        }
 
 	/**
 	 * Legacy settings that used to be allowed and could still be in defines.
