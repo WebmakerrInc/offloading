@@ -44,7 +44,7 @@ if ( ! class_exists( 'WP_Offload_Media_Autoloader' ) ) {
 
 			$bare_source_path = $this->get_bare_source_path( $source_path );
 
-			foreach ( array( 'classes', 'interfaces', 'traits' ) as $type ) {
+                        foreach ( array( 'classes', 'interfaces', 'traits', 'includes' ) as $type ) {
 				$path = $this->get_source_directory( $type ) . $bare_source_path;
 
 				if ( file_exists( $path ) ) {
