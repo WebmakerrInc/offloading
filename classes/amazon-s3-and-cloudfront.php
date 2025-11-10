@@ -49,7 +49,6 @@ use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Meta_WP_Error;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Region_Meta;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_Tools_Errors;
 use DeliciousBrains\WP_Offload_Media\Upgrades\Upgrade_WPOS3_To_AS3CF;
-use Exception;
 
 class Amazon_S3_And_CloudFront extends AS3CF_Plugin_Base {
 

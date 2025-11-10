@@ -8,6 +8,9 @@ use Exception;
 use WP_Error;
 
 class Bunny_Provider extends Storage_Provider {
+	const PUBLIC_ACL  = 'public';
+	const PRIVATE_ACL = 'private';
+
         /**
          * @var array
          */
@@ -211,12 +214,39 @@ class Bunny_Provider extends Storage_Provider {
          *
          * @return array
          */
-        public static function additional_allowed_settings(): array {
-                return array(
-                        static::CDN_URL_SETTING,
-                        static::CUSTOM_CNAME_SETTING,
-                );
-        }
+	public static function additional_allowed_settings(): array {
+		return array(
+			static::CDN_URL_SETTING,
+			static::CUSTOM_CNAME_SETTING,
+		);
+	}
+
+	/**
+	 * Returns default args array for the client.
+	 *
+	 * @return array
+	 */
+	protected function default_client_args() {
+		return array();
+	}
+
+	/**
+	 * Make sure the region string matches the expected format.
+	 *
+	 * @param string $region
+	 *
+	 * @return string
+	 */
+	public function sanitize_region( $region ) {
+		if ( ! is_string( $region ) ) {
+			return '';
+		}
+
+		$region = strtolower( trim( $region ) );
+
+		return preg_replace( '/[^a-z0-9\-]/', '', $region );
+	}
+
 
         /**
          * Process the args before instantiating a new client for the provider's SDK.
@@ -273,6 +303,132 @@ class Bunny_Provider extends Storage_Provider {
 
                 return $this;
         }
+
+	/**
+	 * Bunny Storage zones must be created in the Bunny dashboard.
+	 *
+	 * @param array $args
+	 *
+	 * @throws Exception
+	 */
+	public function create_bucket( array $args ) {
+		throw new Exception( __( 'Buckets (Storage Zones) must be created from the Bunny.net dashboard.', 'amazon-s3-and-cloudfront' ) );
+	}
+
+	/**
+	 * Determine whether the configured bucket exists.
+	 *
+	 * @param string $bucket
+	 *
+	 * @return bool
+	 * @throws Exception
+	 */
+	public function does_bucket_exist( $bucket ) {
+		$response = Bunny_Helper::storage_request( 'HEAD', $bucket, '', $this->get_api_key(), null, array(), $this->get_storage_region() );
+
+		if ( is_wp_error( $response ) ) {
+			$data = $response->get_error_data();
+
+			if ( is_array( $data ) && isset( $data['code'] ) && 404 === (int) $data['code'] ) {
+				return false;
+			}
+
+			throw new Exception( $response->get_error_message() );
+		}
+
+		return true;
+	}
+
+	/**
+	 * Determine the location (region) for the given bucket.
+	 *
+	 * @param array $args
+	 *
+	 * @return string
+	 * @throws Exception
+	 */
+	public function get_bucket_location( array $args ) {
+		$bucket = isset( $args['Bucket'] ) ? $args['Bucket'] : '';
+
+		if ( empty( $bucket ) ) {
+			throw new Exception( __( 'No bucket specified when requesting Bunny bucket location.', 'amazon-s3-and-cloudfront' ) );
+		}
+
+		$response = Bunny_Helper::storage_request( 'HEAD', $bucket, '', $this->get_api_key(), null, array(), $this->get_storage_region() );
+
+		if ( is_wp_error( $response ) ) {
+			throw new Exception( $response->get_error_message() );
+		}
+
+		$headers = wp_remote_retrieve_headers( $response );
+
+		if ( isset( $headers['x-storagezoneregion'] ) && ! empty( $headers['x-storagezoneregion'] ) ) {
+			return $this->sanitize_region( $headers['x-storagezoneregion'] );
+		}
+
+		$region = $this->get_storage_region();
+
+		if ( ! empty( $region ) ) {
+			return $this->sanitize_region( $region );
+		}
+
+		return '';
+	}
+
+	/**
+	 * Bunny does not expose a bucket listing endpoint.
+	 *
+	 * @param array $args
+	 *
+	 * @throws Exception
+	 */
+	public function list_buckets( array $args = array() ) {
+		throw new Exception( __( 'Listing Bunny Storage Zones via the API is not supported. Please enter the zone name manually.', 'amazon-s3-and-cloudfront' ) );
+	}
+
+	/**
+	 * Check whether an object exists.
+	 *
+	 * @param string $bucket
+	 * @param string $key
+	 * @param array  $options
+	 *
+	 * @return bool
+	 * @throws Exception
+	 */
+	public function does_object_exist( $bucket, $key, array $options = array() ) {
+		$response = Bunny_Helper::storage_request( 'HEAD', $bucket, $key, $this->get_api_key(), null, array(), $this->get_storage_region() );
+
+		if ( is_wp_error( $response ) ) {
+			$data = $response->get_error_data();
+
+			if ( is_array( $data ) && isset( $data['code'] ) && 404 === (int) $data['code'] ) {
+				return false;
+			}
+
+			throw new Exception( $response->get_error_message() );
+		}
+
+		return true;
+	}
+
+	/**
+	 * Get public ACL string.
+	 *
+	 * @return string
+	 */
+	public function get_public_acl() {
+		return static::PUBLIC_ACL;
+	}
+
+	/**
+	 * Get private ACL string.
+	 *
+	 * @return string
+	 */
+	public function get_private_acl() {
+		return static::PRIVATE_ACL;
+	}
 
         /**
          * Fetch an object from Bunny storage.
