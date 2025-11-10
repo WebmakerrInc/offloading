@@ -114,6 +114,19 @@ class Bunny_Provider extends Storage_Provider {
         protected $console_url_prefix_param = '';
 
         /**
+         * Get the suffix param to append to the link to the provider's console.
+         *
+         * @param string $bucket
+         * @param string $prefix
+         * @param string $region
+         *
+         * @return string
+         */
+        protected function get_console_url_suffix_param( string $bucket = '', string $prefix = '', string $region = '' ): string {
+                return '';
+        }
+
+        /**
          * Settings key where Bunny CDN URL is stored.
          */
         const CDN_URL_SETTING = 'bunny-cdn-url';
